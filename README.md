@@ -18,7 +18,7 @@ If users are only interested in running the classification script, they can find
 
 ### 1) Preprocessing of trajectories
 
-To run the preprocessing of the trajectories, users can simply run the following script, located inside [this folder](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/tree/main/1_Preprocessing):
+To run the preprocessing of the trajectories, users can run the following matlab script, located inside [this folder](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/tree/main/1_Preprocessing):
 ```matlab
 main.m
 ```
