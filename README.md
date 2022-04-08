@@ -19,4 +19,7 @@ TODO
 
 ### 2) Machine Learning classification
 
-TODO
+To run the classification, 
+```python
+classification_eye_trajectories.py --config config_eye_trajectories.json
+```
