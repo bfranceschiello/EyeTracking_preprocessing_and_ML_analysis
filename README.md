@@ -30,4 +30,4 @@ To run the classification script, users can utilize the config file `config_eye_
 ```python
 classification_eye_trajectories.py --config config_eye_trajectories.json
 ```
-The user should ensure that the paths inside the config file are correct. More details regarding the input arguments of the config file can be found inside the description of the function `ml_analysis` inside the `classification_eye_trajectories.py` [script](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/blob/a4222d99f9584e782befc85ded5e2f4402c31d87/2_ML_Analysis/classification_eye_trajectories.py#L15)
+The user should ensure that the paths inside the config file are correct. More details regarding the input arguments of the config file can be found inside the description of the function `ml_analysis` inside the `classification_eye_trajectories.py` [script](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/blob/a4222d99f9584e782befc85ded5e2f4402c31d87/2_ML_Analysis/classification_eye_trajectories.py#L15).
