@@ -14,7 +14,6 @@
 	"use_x_coords": "False",
 
 
-	"ds_path": "/home/newuser/Downloads/Eye_Tracking_Dataset/5_Dataset/",
-	"output_folder": "/home/newuser/Downloads/Eye_Tracking_Dataset/outputs"
-		
+	"ds_path": "/path/to/github/dir/2_ML_Analysis/dataset_preprocessed_trajectories",
+	"output_folder": "/path/to/output/dir/"		
 }
