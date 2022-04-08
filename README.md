@@ -26,7 +26,7 @@ This file loads tre trajectories from the [Dataset folder](https://github.com/bf
 
 ### 2) Machine Learning classification
 
-To run the classification script, users can utilize the config file `config_eye_trajectories.json` located inside [this folder](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/tree/main/0_Config_files) and run:
+To run the classification script, users can utilize the config file `config_eye_trajectories.json` located inside [this folder](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/tree/main/0_Config_files) and run the following python [script](https://github.com/bfranceschiello/EyeTracking_preprocessing_and_ML_analysis/blob/main/2_ML_Analysis/classification_eye_trajectories.py):
 ```python
 classification_eye_trajectories.py --config config_eye_trajectories.json
 ```
