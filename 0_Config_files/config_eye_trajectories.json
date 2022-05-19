@@ -1,6 +1,7 @@
 {	
 	"network_dims": 2,
 	"interpolate_coords": "True",
+	"image_2d": "False",
 	"model_to_use": "cnn",
 	"screen_dims": [768, 1024],
 	"conv_filters": [8, 16, 32],
