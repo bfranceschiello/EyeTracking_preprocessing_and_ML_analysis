@@ -12,8 +12,22 @@ from utils.utils_ml_analysis import load_trajectories_and_labels, create_lists_f
      plot_roc_curve, plot_pr_curve, save_pickle_list_to_disk, load_config_file, str2bool
 
 
-def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: float, learning_rate: float, batch_size: int, epochs: int, ext_cv_folds: int,
-                nb_random_runs: int, output_folder: str, use_x_coords: bool, network_dims: int, screen_dims: list, interpolate_coords: bool, model_to_use: str):
+def ml_analysis(ds_path: str,
+                conv_filters: list,
+                fc_nodes: list,
+                drop_rate: float,
+                learning_rate: float,
+                batch_size: int,
+                epochs: int,
+                ext_cv_folds: int,
+                nb_random_runs: int,
+                output_folder: str,
+                use_x_coords: bool,
+                network_dims: int,
+                image_2d: bool,
+                screen_dims: list,
+                interpolate_coords: bool,
+                model_to_use: str):
     """This function performs the classification of the eye-trajectories
     Args:
         ds_path (str): path to folder containing the trajectories and the labels
@@ -28,6 +42,7 @@ def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: flo
         output_folder (str): path to output directory
         use_x_coords (bool): if True, we use the x coordinates of the trajectories; otherwise we use the y coordinates of the trajectories
         network_dims (int): if 1, we use the 1D-CNN; if 2, we use the 2D-CNN
+        image_2d (bool): if True, we treat the trajectories as images; if False, we treat them as a (2x1000) vector
         screen_dims (list): dimensions of the screen where the task is performed
         interpolate_coords (bool): only used for the 2D-CNN; it True, we interpolate the coordinates to create a unique trajectory; if False, we use only the recorded points
         model_to_use (str): name of the model that should be used for the classification
@@ -38,7 +53,7 @@ def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: flo
     # if output folder does not exist
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)  # create it
-        path_config_file = sys.argv[2]  # type: str # save filename
+        path_config_file = sys.argv[2]  # type: str # save config file so that we always know with which args the script was run
         shutil.copyfile(path_config_file, os.path.join(output_folder, "config_file.json"))
 
     x_healthy, labels_healthy, subject_mapping_healthy,\
@@ -47,7 +62,8 @@ def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: flo
                                                                                                                             use_x_coords,
                                                                                                                             network_dims,
                                                                                                                             screen_dims,
-                                                                                                                            interpolate_coords)
+                                                                                                                            interpolate_coords,
+                                                                                                                            image_2d)
 
     # create lists for cv split at the subject level
     all_subjects, all_labels = create_lists_for_cv_split(subject_mapping_healthy, subject_mapping_neglect, subject_mapping_neglect_heminopia)
@@ -66,15 +82,17 @@ def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: flo
     aupr_across_runs = []
 
     # we perform several random realizations (runs) of the cross-validation such that we have different train-test splits
-    for seed in range(nb_random_runs):
+    for seed in range(nb_random_runs):  # seed changes at every iteration of the for loop
         print("\n\n ------------------------- Started random realization {}".format(seed+1))
         # BEGIN CROSS VALIDATION
-        # since the dataset is very imbalanced, apply stratified cross validation
+        # since the dataset is imbalanced, apply stratified cross validation
         ext_skf = StratifiedKFold(n_splits=ext_cv_folds, shuffle=True, random_state=seed)
         cv_fold = 0  # type: int # counter to keep track of cross-validation fold
         all_test_subs_predictions = []  # type
         all_test_subs_ground_truths = []
         dict_probabilistic_score = {}
+
+        # the train-test split is performed at a subject-wise level
         for ext_train_idxs, test_idxs in ext_skf.split(all_subjects, all_labels):
             cv_fold += 1
             print("Started external CV fold {}".format(cv_fold))
@@ -82,11 +100,23 @@ def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: flo
             ext_train_subjects = [all_subjects[i] for i in ext_train_idxs]
             test_subjects = [all_subjects[i] for i in test_idxs]
 
-            train_trajectories, train_labels = extract_trajectories_and_labels(subject_mapping_healthy, subject_mapping_neglect, subject_mapping_neglect_heminopia, ext_train_subjects,
-                                                                               x_healthy, x_neglect, x_neglect_heminopia, labels_healthy, labels_neglect, labels_neglect_heminopia, network_dims)
+            train_trajectories, train_labels = extract_trajectories_and_labels(subject_mapping_healthy,
+                                                                               subject_mapping_neglect,
+                                                                               subject_mapping_neglect_heminopia,
+                                                                               ext_train_subjects,
+                                                                               x_healthy,
+                                                                               x_neglect,
+                                                                               x_neglect_heminopia,
+                                                                               labels_healthy,
+                                                                               labels_neglect,
+                                                                               labels_neglect_heminopia,
+                                                                               network_dims)
 
             # --------------------- train the model ---------------------
-            batched_train_dataset = create_batched_tf_dataset(train_trajectories, train_labels, batch_size, shuffle=True)  # create tf dataset
+            batched_train_dataset = create_batched_tf_dataset(train_trajectories,
+                                                              train_labels,
+                                                              batch_size,
+                                                              shuffle=True)  # create tf dataset
 
             if network_dims == 1:
                 inputs = tf.keras.Input(shape=(train_trajectories.shape[1], 1), name='eye_trajectory')
@@ -95,8 +125,18 @@ def ml_analysis(ds_path: str, conv_filters: list, fc_nodes: list, drop_rate: flo
             else:
                 raise ValueError("Unknown value for network_dims; only 1 and 2 allowed; got {} instead".format(network_dims))
 
-            trained_model = create_model_and_train(model_to_use, inputs, conv_filters, fc_nodes, drop_rate, learning_rate, network_dims,
-                                                   batched_train_dataset, epochs, train_trajectories, train_labels)
+            trained_model = create_model_and_train(model_to_use,
+                                                   inputs,
+                                                   conv_filters,
+                                                   fc_nodes,
+                                                   drop_rate,
+                                                   learning_rate,
+                                                   network_dims,
+                                                   batched_train_dataset,
+                                                   epochs,
+                                                   train_trajectories,
+                                                   train_labels,
+                                                   image_2d)
 
             # --------------------- inference on test subjects ---------------------
             for test_sub in test_subjects:  # predict on test subjects one by one
@@ -189,6 +229,7 @@ def main():
     # extract input args from dictionary
     network_dims = config_dict['network_dims']  # type: int # set to 1 if we want to use the 1D CNN; set to 2 if we want to use the 2D CNN
     interpolate_coords = str2bool(config_dict['interpolate_coords'])  # type: bool  # if True, we interpolate the coordinates; otherwise we use the single points
+    image_2d = str2bool(config_dict['image_2d'])  # type: bool # if True, we treat the trajectories as images; if False, we treat them as a (2x1000) vector
     model_to_use = config_dict['model_to_use']  # type: str
     screen_dims = config_dict['screen_dims']
     conv_filters = config_dict['conv_filters']
@@ -219,8 +260,22 @@ def main():
                                                                                                                            "x" if use_x_coords else "y",
                                                                                                                            date))
 
-    ml_analysis(ds_path, conv_filters, fc_nodes, drop_rate, learning_rate, batch_size, epochs, ext_cv_folds,
-                 nb_random_runs, output_folder, use_x_coords, network_dims, screen_dims, interpolate_coords, model_to_use)
+    ml_analysis(ds_path,
+                conv_filters,
+                fc_nodes,
+                drop_rate,
+                learning_rate,
+                batch_size,
+                epochs,
+                ext_cv_folds,
+                nb_random_runs,
+                output_folder,
+                use_x_coords,
+                network_dims,
+                image_2d,
+                screen_dims,
+                interpolate_coords,
+                model_to_use)
 
 
 if __name__ == '__main__':
