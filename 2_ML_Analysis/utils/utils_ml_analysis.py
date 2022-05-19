@@ -5,7 +5,8 @@ import os
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_recall_curve, roc_curve, auc, accuracy_score, f1_score, precision_score, recall_score, confusion_matrix
 import numpy as np
-import scipy
+from scipy.io import loadmat
+from scipy.stats import zscore
 import tempfile
 import imageio
 from skimage import color
@@ -233,134 +234,137 @@ def pad_image_to_specified_shape(input_img: np.ndarray, desired_x_dim: int, desi
     return padded_img
 
 
-def load_trajectories_and_labels(ds_path, use_x_coords, network_dims, screen_dims, interpolate_coords):
-    labels_dict = scipy.io.loadmat(os.path.join(ds_path, 'Y_p.mat'))
-    subject_mapping_dict = scipy.io.loadmat(os.path.join(ds_path, 'ID_Tr.mat'))
+def load_trajectories_and_labels(ds_path,
+                                 use_x_coords,
+                                 network_dims,
+                                 screen_dims,
+                                 interpolate_coords,
+                                 image_2d):
+    labels_dict = loadmat(os.path.join(ds_path, 'Y_p.mat'))
+    subject_mapping_dict = loadmat(os.path.join(ds_path, 'ID_Tr.mat'))
 
     labels = np.squeeze(labels_dict["Y_p"])  # extract labels
     subject_mapping = np.squeeze(subject_mapping_dict["ID_Tr"])  # it contains the mapping (i.e. it tells us, for every trajectory, to which subject the trajectory belongs to)
 
-    # Healthy
-    indxH = np.squeeze(np.argwhere((subject_mapping == 1) | (subject_mapping == 2) | (subject_mapping == 9) | (subject_mapping == 11) | (subject_mapping == 13) |
-                                   (subject_mapping == 14) | (subject_mapping == 15) | (subject_mapping == 17) | (subject_mapping == 18)))  # extract trajectory indexes of healthy subs
+    # get indexes of Healthy subjects
+    indx_h = np.squeeze(np.argwhere((subject_mapping == 1) | (subject_mapping == 2) | (subject_mapping == 9) | (subject_mapping == 11) | (subject_mapping == 13) |
+                                    (subject_mapping == 14) | (subject_mapping == 15) | (subject_mapping == 17) | (subject_mapping == 18)))  # extract trajectory indexes of healthy subs
 
-    # Neglect
-    indxN = np.squeeze(np.argwhere((subject_mapping == 19) | (subject_mapping == 20) | (subject_mapping == 21) | (subject_mapping == 22) |
-                                   (subject_mapping == 23) | (subject_mapping == 7) | (subject_mapping == 24)))  # extract trajectory indexes of subs with neglect
+    # get indexes of Neglect patients
+    indx_n = np.squeeze(np.argwhere((subject_mapping == 19) | (subject_mapping == 20) | (subject_mapping == 21) | (subject_mapping == 22) |
+                                    (subject_mapping == 23) | (subject_mapping == 7) | (subject_mapping == 24)))  # extract trajectory indexes of subs with neglect
 
-    # Neglect + Heminopia
-    indxNH = np.squeeze(np.argwhere((subject_mapping == 10) | (subject_mapping == 12) | (subject_mapping == 16) | (subject_mapping == 3) |
-                                    (subject_mapping == 4) | (subject_mapping == 5) | (subject_mapping == 6) | (subject_mapping == 8)))  # extract trajectory indexes of subs with neglect heminopia
+    # get indexed of Neglect+Heminopia patients
+    indx_nh = np.squeeze(np.argwhere((subject_mapping == 10) | (subject_mapping == 12) | (subject_mapping == 16) | (subject_mapping == 3) |
+                                     (subject_mapping == 4) | (subject_mapping == 5) | (subject_mapping == 6) | (subject_mapping == 8)))  # extract trajectory indexes of subs with neglect heminopia
+
+    # load x coords
+    x_coords_dict = loadmat(os.path.join(ds_path, 'X_all.mat'))
+    x_coords = x_coords_dict["X_all"]
+    x_coords_trim = x_coords[:, 999:2000]  # choose the trajectory length (i.e. trim trajectory)
+
+    # load y coordinates
+    y_coords_dict = loadmat(os.path.join(ds_path, 'Y_all.mat'))
+    y_coords = y_coords_dict["Y_all"]
+    y_coords_trim = y_coords[:, 999:2000]  # choose the trajectory length (i.e. trim trajectory)
 
     # if we want to build a 1D CNN, we only extract one coordinate of the trajectories
     if network_dims == 1:
-        # load from disk
-        if use_x_coords:  # use x coordinates
-            x_coords_dict = scipy.io.loadmat(os.path.join(ds_path, 'X_all.mat'))
-            x_coords = x_coords_dict["X_all"]
-        else:  # use y coordinates
-            x_coords_dict = scipy.io.loadmat(os.path.join(ds_path, 'Y_all.mat'))
-            x_coords = x_coords_dict["Y_all"]
-
-        # extract coordinates and labels
-        x_coords_trim = x_coords[:, 999:2000]  # choose the trajectory length
-
         # z-score normalize x coordinates
-        x_coords_trim_normalized = scipy.stats.zscore(x_coords_trim, axis=1)
+        if use_x_coords:  # use x coordinates
+            x_coords_trim_normalized = zscore(x_coords_trim, axis=1)
+        else:  # use y coordinates
+            x_coords_trim_normalized = zscore(y_coords_trim, axis=1)
 
-        x_healthy = x_coords_trim_normalized[indxH, :]  # extract only trajectories belonging to healthy participants
-        x_neglect = x_coords_trim_normalized[indxN, :]  # extract only trajectories belonging to participants with neglect
-        x_neglect_heminopia = x_coords_trim_normalized[indxNH, :]  # extract only trajectories belonging to participants with neglect + heminopia
+        x_healthy = x_coords_trim_normalized[indx_h, :]  # extract only trajectories belonging to healthy participants
+        x_neglect = x_coords_trim_normalized[indx_n, :]  # extract only trajectories belonging to participants with neglect
+        x_neglect_heminopia = x_coords_trim_normalized[indx_nh, :]  # extract only trajectories belonging to participants with neglect + heminopia
 
-    # if instead we want to build a 2D CNN, then we extract both coordinates from the trajectories and create an image with 1s on the trajectories, and 0s in the rest of the pixels
+    # if instead we want to build a 2D CNN
     elif network_dims == 2:
-        # load x coordinates
-        x_coords_dict = scipy.io.loadmat(os.path.join(ds_path, 'X_all.mat'))
-        x_coords = x_coords_dict["X_all"]
-        x_coords_trim = x_coords[:, 999:2000]  # choose the trajectory length (i.e. trim trajectory)
-
-        # load y coordinates
-        y_coords_dict = scipy.io.loadmat(os.path.join(ds_path, 'Y_all.mat'))
-        y_coords = y_coords_dict["Y_all"]
-        y_coords_trim = y_coords[:, 999:2000]  # choose the trajectory length (i.e. trim trajectory)
-
+        # extract number of trajectories
         nb_trajectories = y_coords_trim.shape[0]
-        # len_of_trajectories = y_coords_trim.shape[1]
-
-        # create list: each item contains the x and y coordinates stacked together
+        # create list: each item corresponds to a trajectory and contains the x and y coordinates stacked together
         xy_coords = [np.stack((x_coords_trim[idx, :], y_coords_trim[idx, :])) for idx in range(nb_trajectories)]
 
-        # create empty images (one image per trajectory)
-        empty_images = [np.zeros((screen_dims[1] + 1, screen_dims[0] + 1)) for _ in range(nb_trajectories)]
-        dirpath = tempfile.mkdtemp()  # create tmp dir
-        tmp_img_path = os.path.join(dirpath, "img.png")  # create tmp path for images
+        # if we want to treat the trajectories as images with 1s on the trajectories, and 0s in the rest of the pixels
+        if image_2d:
+            # create empty images (one image per trajectory)
+            empty_images = [np.zeros((screen_dims[1] + 1, screen_dims[0] + 1)) for _ in range(nb_trajectories)]
+            dirpath = tempfile.mkdtemp()  # create tmp dir
+            tmp_img_path = os.path.join(dirpath, "img.png")  # create tmp path for images
 
-        images_with_coords_no_interpolation = []
-        images_with_coords_interpolated = []
+            images_with_coords_no_interpolation = []
+            images_with_coords_interpolated = []
 
-        for img, coords in zip(empty_images, xy_coords):
-            # -------------- create non-interpolated image
-            img[tuple(coords)] = 1  # assign 1 to the pixels of the trajectories (i.e. where the subject is looking during the task)
-            img = remove_zeros_ij_from_image(img)  # crop only around trajectories
-            images_with_coords_no_interpolation.append(img)
+            for img, coords in zip(empty_images, xy_coords):
+                # -------------- create non-interpolated image
+                img[tuple(coords)] = 1  # assign 1 to the pixels of the trajectories (i.e. where the subject is looking during the task)
+                img = remove_zeros_ij_from_image(img)  # crop only around trajectories
+                images_with_coords_no_interpolation.append(img)
 
-            if interpolate_coords:
-                # -------------- create interpolated image
-                fig, ax1 = plt.subplots()  # create figure
-                ax1.plot(coords[0, :], coords[1, :])  # make plot (which interpolates the points by default)
-                ax1.set_xlim([0, screen_dims[1] + 1])  # set xlim
-                ax1.set_ylim([0, screen_dims[0] + 1])  # set ylim
-                ax1.set_axis_off()  # remove axes
-                fig.savefig(tmp_img_path)  # save the full figure in tmp dir
-                imrgb = imageio.imread(tmp_img_path)  # load image as numpy array
-                gray_image = color.rgb2gray(color.rgba2rgb(imrgb))  # convert from rgb to grayscale
-                gray_image = np.where(gray_image == 1, 0, gray_image)  # set background to 0
-                gray_image = remove_zeros_ij_from_image(gray_image)  # crop only around trajectories
-                images_with_coords_interpolated.append(gray_image)
-                plt.close('all')  # close all opened figures (needed otherwise many figures will remain open)
+                if interpolate_coords:
+                    # -------------- create interpolated image
+                    fig, ax1 = plt.subplots()  # create figure
+                    ax1.plot(coords[0, :], coords[1, :])  # make plot (which interpolates the points by default)
+                    ax1.set_xlim([0, screen_dims[1] + 1])  # set xlim
+                    ax1.set_ylim([0, screen_dims[0] + 1])  # set ylim
+                    ax1.set_axis_off()  # remove axes
+                    fig.savefig(tmp_img_path)  # save the full figure in tmp dir
+                    imrgb = imageio.imread(tmp_img_path)  # load image as numpy array
+                    gray_image = color.rgb2gray(color.rgba2rgb(imrgb))  # convert from rgb to grayscale
+                    gray_image = np.where(gray_image == 1, 0, gray_image)  # set background to 0
+                    gray_image = remove_zeros_ij_from_image(gray_image)  # crop only around trajectories
+                    images_with_coords_interpolated.append(gray_image)
+                    plt.close('all')  # close all opened figures (needed otherwise many figures will remain open)
 
-        shutil.rmtree(dirpath)  # remove tmp directory
+            shutil.rmtree(dirpath)  # remove tmp directory
 
-        if interpolate_coords:  # if we want to interpolate the trajectories
-            img_shapes_with_interpolation = [img.shape for img in images_with_coords_interpolated]
-            max_img_shape_interp = tuple(np.max(img_shapes_with_interpolation, axis=0).astype(int))  # extract max image shape
-            padded_imgs_interp = [pad_image_to_specified_shape(img, max_img_shape_interp[0], max_img_shape_interp[1]) for img in images_with_coords_interpolated]
-            images_with_coords_np = np.asarray(padded_imgs_interp)  # convert list to numpy array
-        else:  # if instead we don't want to interpolate the trajectories
-            img_shapes_no_interpolation = [img.shape for img in images_with_coords_no_interpolation]
-            max_img_shape_no_interp = tuple(np.max(img_shapes_no_interpolation, axis=0).astype(int))  # extract max image shape
-            padded_imgs_no_interp = [pad_image_to_specified_shape(img, max_img_shape_no_interp[0], max_img_shape_no_interp[1]) for img in images_with_coords_no_interpolation]
-            images_with_coords_np = np.asarray(padded_imgs_no_interp)  # convert list to numpy array
+            if interpolate_coords:  # if we want to interpolate the trajectories
+                img_shapes_with_interpolation = [img.shape for img in images_with_coords_interpolated]
+                max_img_shape_interp = tuple(np.max(img_shapes_with_interpolation, axis=0).astype(int))  # extract max image shape
+                padded_imgs_interp = [pad_image_to_specified_shape(img, max_img_shape_interp[0], max_img_shape_interp[1]) for img in images_with_coords_interpolated]
+                images_with_coords_np = np.asarray(padded_imgs_interp)  # convert list to numpy array
+            else:  # if instead we don't want to interpolate the trajectories
+                img_shapes_no_interpolation = [img.shape for img in images_with_coords_no_interpolation]
+                max_img_shape_no_interp = tuple(np.max(img_shapes_no_interpolation, axis=0).astype(int))  # extract max image shape
+                padded_imgs_no_interp = [pad_image_to_specified_shape(img, max_img_shape_no_interp[0], max_img_shape_no_interp[1]) for img in images_with_coords_no_interpolation]
+                images_with_coords_np = np.asarray(padded_imgs_no_interp)  # convert list to numpy array
 
-        x_healthy = images_with_coords_np[indxH, :, :]  # extract only images belonging to healthy participants
-        x_neglect = images_with_coords_np[indxN, :, :]  # extract only images belonging to participants with neglect
-        x_neglect_heminopia = images_with_coords_np[indxNH, :, :]  # extract only images belonging to participants with neglect + heminopia
+            x_healthy = images_with_coords_np[indx_h, :, :]  # extract only images belonging to healthy participants
+            x_neglect = images_with_coords_np[indx_n, :, :]  # extract only images belonging to participants with neglect
+            x_neglect_heminopia = images_with_coords_np[indx_nh, :, :]  # extract only images belonging to participants with neglect + heminopia
 
+        # if instead we want to treat the trajectories as 2D vectors (e.g. 2x1000)
+        else:
+            x_healthy = np.asanyarray([coordinate_pair for idx, coordinate_pair in enumerate(xy_coords) if idx in indx_h])
+            x_neglect = np.asanyarray([coordinate_pair for idx, coordinate_pair in enumerate(xy_coords) if idx in indx_n])
+            x_neglect_heminopia = np.asanyarray([coordinate_pair for idx, coordinate_pair in enumerate(xy_coords) if idx in indx_nh])
     else:
         raise ValueError("Unknown value for network_dims; only 1 and 2 allowed; got {} instead".format(network_dims))
 
-    labels_healthy = labels[indxH]  # extract corresponding labels (the labels are trajectory-wise)
-    labels_neglect = labels[indxN]  # extract corresponding labels (the labels are trajectory-wise)
-    labels_neglect_heminopia = labels[indxNH]  # extract corresponding labels (the labels are trajectory-wise)
+    labels_healthy = labels[indx_h]  # extract corresponding labels (the labels are trajectory-wise)
+    labels_neglect = labels[indx_n]  # extract corresponding labels (the labels are trajectory-wise)
+    labels_neglect_heminopia = labels[indx_nh]  # extract corresponding labels (the labels are trajectory-wise)
 
-    subject_mapping_healthy = subject_mapping[indxH]
-    subject_mapping_neglect = subject_mapping[indxN]
-    subject_mapping_neglect_heminopia = subject_mapping[indxNH]
+    subject_mapping_healthy = subject_mapping[indx_h]
+    subject_mapping_neglect = subject_mapping[indx_n]
+    subject_mapping_neglect_heminopia = subject_mapping[indx_nh]
 
     return x_healthy, labels_healthy, subject_mapping_healthy,\
                 x_neglect, labels_neglect, subject_mapping_neglect,\
                     x_neglect_heminopia, labels_neglect_heminopia, subject_mapping_neglect_heminopia
 
 
-def find_idxs_of_interest(subject_mapping_healthy, subject_mapping_neglect, subject_mapping_neglect_heminopia, mappings):
+def find_idxs_of_interest(subject_mapping_healthy, subject_mapping_neglect, subject_mapping_neglect_heminopia, subs_of_interest):
 
-    if isinstance(mappings, np.uint8):
-        mappings = [mappings]
+    if isinstance(subs_of_interest, np.uint8):
+        subs_of_interest = [subs_of_interest]
 
-    # find indexes of training trajectories
-    idxs_healthy = [idx for idx, value in enumerate(list(subject_mapping_healthy)) if value in mappings]
-    idxs_neglect = [idx for idx, value in enumerate(list(subject_mapping_neglect)) if value in mappings]
-    idxs_neglect_heminopia = [idx for idx, value in enumerate(list(subject_mapping_neglect_heminopia)) if value in mappings]
+    # find indexes of trajectories corresponding to the subjects of interest (e.g. only the training subjects, or only the test subjects, etc.)
+    idxs_healthy = [idx for idx, value in enumerate(list(subject_mapping_healthy)) if value in subs_of_interest]
+    idxs_neglect = [idx for idx, value in enumerate(list(subject_mapping_neglect)) if value in subs_of_interest]
+    idxs_neglect_heminopia = [idx for idx, value in enumerate(list(subject_mapping_neglect_heminopia)) if value in subs_of_interest]
 
     return idxs_healthy, idxs_neglect, idxs_neglect_heminopia
 
@@ -378,7 +382,13 @@ def create_batched_tf_dataset(trajectories, labels, batch_size, shuffle=True):
     return batched_tf_dataset
 
 
-def create_compiled_cnn(inputs, conv_filters, fc_nodes, drop_rate, learning_rate, network_dims):
+def create_compiled_cnn(inputs,
+                        conv_filters,
+                        fc_nodes,
+                        drop_rate,
+                        learning_rate,
+                        network_dims,
+                        image_2d):
     if network_dims == 1:
         conv1 = tf.keras.layers.Conv1D(conv_filters[0], 3, activation='relu', padding='same', data_format="channels_last")(inputs)
         conv1 = tf.keras.layers.Conv1D(conv_filters[0], 3, activation='relu', padding='same')(conv1)
@@ -392,7 +402,7 @@ def create_compiled_cnn(inputs, conv_filters, fc_nodes, drop_rate, learning_rate
         conv3 = tf.keras.layers.Conv1D(conv_filters[2], 3, activation='relu', padding='same')(conv3)
         bn3 = tf.keras.layers.BatchNormalization()(conv3)
         pool3 = tf.keras.layers.MaxPooling1D(pool_size=2)(bn3)
-    elif network_dims == 2:
+    elif network_dims == 2 and image_2d:
         conv1 = tf.keras.layers.Conv2D(conv_filters[0], 3, activation='relu', padding='same', data_format="channels_last")(inputs)
         conv1 = tf.keras.layers.Conv2D(conv_filters[0], 3, activation='relu', padding='same')(conv1)
         bn1 = tf.keras.layers.BatchNormalization()(conv1)
@@ -405,6 +415,19 @@ def create_compiled_cnn(inputs, conv_filters, fc_nodes, drop_rate, learning_rate
         conv3 = tf.keras.layers.Conv2D(conv_filters[2], 3, activation='relu', padding='same')(conv3)
         bn3 = tf.keras.layers.BatchNormalization()(conv3)
         pool3 = tf.keras.layers.MaxPooling2D(pool_size=2)(bn3)
+    elif network_dims == 2 and not image_2d:
+        conv1 = tf.keras.layers.Conv2D(conv_filters[0], 2, activation='relu', padding='same', data_format="channels_last")(inputs)
+        conv1 = tf.keras.layers.Conv2D(conv_filters[0], 2, activation='relu', padding='same')(conv1)
+        bn1 = tf.keras.layers.BatchNormalization()(conv1)
+        pool1 = tf.keras.layers.MaxPooling2D(pool_size=(1, 2))(bn1)
+        conv2 = tf.keras.layers.Conv2D(conv_filters[1], 2, activation='relu', padding='same', data_format="channels_last")(pool1)
+        conv2 = tf.keras.layers.Conv2D(conv_filters[1], 2, activation='relu', padding='same')(conv2)
+        bn2 = tf.keras.layers.BatchNormalization()(conv2)
+        pool2 = tf.keras.layers.MaxPooling2D(pool_size=(1, 2))(bn2)
+        conv3 = tf.keras.layers.Conv2D(conv_filters[2], 2, activation='relu', padding='same', data_format="channels_last")(pool2)
+        conv3 = tf.keras.layers.Conv2D(conv_filters[2], 2, activation='relu', padding='same')(conv3)
+        bn3 = tf.keras.layers.BatchNormalization()(conv3)
+        pool3 = tf.keras.layers.MaxPooling2D(pool_size=(1, 2))(bn3)
     else:
         raise ValueError("Unknown value for network_dims; only 1 and 2 allowed; got {} instead".format(network_dims))
 
@@ -436,31 +459,45 @@ def create_lists_for_cv_split(subject_mapping_healthy, subject_mapping_neglect, 
     labels_neglect_all_list = [0 for _ in range(len(id_neglect_all))]
     all_labels = labels_healthy_list + labels_neglect_all_list
 
+    assert len(all_subjects) == len(all_labels), "There should be a one-to-one correspondence between subjects and labels"
+
     return all_subjects, all_labels
 
 
-def extract_trajectories_and_labels(subject_mapping_healthy, subject_mapping_neglect, subject_mapping_neglect_heminopia, subs_of_interest,
-                                    x_healthy, x_neglect, x_neglect_heminopia, labels_healthy, labels_neglect, labels_neglect_heminopia, network_dims):
-
-    # find indexes of interest
-    idxs_healthy, idxs_neglect, idxs_neglect_heminopia = find_idxs_of_interest(subject_mapping_healthy, subject_mapping_neglect,
-                                                                               subject_mapping_neglect_heminopia, subs_of_interest)
+def extract_trajectories_and_labels(subject_mapping_healthy,
+                                    subject_mapping_neglect,
+                                    subject_mapping_neglect_heminopia,
+                                    subs_of_interest,
+                                    x_healthy,
+                                    x_neglect,
+                                    x_neglect_heminopia,
+                                    labels_healthy,
+                                    labels_neglect,
+                                    labels_neglect_heminopia,
+                                    network_dims):
+    # find indexes of interest (e.g. only of training subjects)
+    idxs_healthy, idxs_neglect, idxs_neglect_heminopia = find_idxs_of_interest(subject_mapping_healthy,
+                                                                               subject_mapping_neglect,
+                                                                               subject_mapping_neglect_heminopia,
+                                                                               subs_of_interest)
 
     # select trajectories of interest (either train or test) and merge them
     trajectories_healthy = x_healthy[idxs_healthy, :]
     trajectories_neglect = x_neglect[idxs_neglect, :]
     trajectories_neglect_heminopia = x_neglect_heminopia[idxs_neglect_heminopia, :]
+    # concatenate all trajectories
     trajectories = np.concatenate((trajectories_healthy, trajectories_neglect, trajectories_neglect_heminopia), axis=0)
 
     # create train labels
     labels_healthy = labels_healthy[idxs_healthy]
     labels_neglect = labels_neglect[idxs_neglect]
     labels_neglect_heminopia = labels_neglect_heminopia[idxs_neglect_heminopia]
+    # concatenate all labels (with same order of trajectories)
     labels = np.concatenate((labels_healthy, labels_neglect, labels_neglect_heminopia))
 
     assert trajectories.shape[0] == labels.shape[0], "Different number of trajectories/labels found"
 
-    # convert label values of -1 into 0
+    # convert label values of neglect patients from -1 to 0
     neglect_label = -1
     if neglect_label in labels:
         labels = np.where(labels == -1, 0, labels)
@@ -501,14 +538,24 @@ def find_ground_truth(all_subjects, test_sub, all_labels):
     return ground_truth_label
 
 
-def create_model_and_train(model_to_use, inputs, conv_filters, fc_nodes, drop_rate, learning_rate, network_dims,
-                           batched_train_dataset, epochs, train_trajectories, train_labels):
+def create_model_and_train(model_to_use,
+                           inputs,
+                           conv_filters,
+                           fc_nodes,
+                           drop_rate,
+                           learning_rate,
+                           network_dims,
+                           batched_train_dataset,
+                           epochs,
+                           train_trajectories,
+                           train_labels,
+                           image_2d):
     # shuffle trajectories and labels
     train_trajectories_shuffled, train_labels_shuffled = shuffle_sklearn(train_trajectories, train_labels, random_state=123)
 
     if model_to_use == "cnn":
         # create CNN
-        model = create_compiled_cnn(inputs, conv_filters, fc_nodes, drop_rate, learning_rate, network_dims)  # create CNN
+        model = create_compiled_cnn(inputs, conv_filters, fc_nodes, drop_rate, learning_rate, network_dims, image_2d)  # create CNN
         _ = model.fit(batched_train_dataset, epochs=epochs)  # train
     elif model_to_use == "svm":
         model = SVC()
